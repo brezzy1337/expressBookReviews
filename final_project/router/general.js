@@ -70,17 +70,26 @@ public_users.get('/title/:title',function (req, res) {
 });
 
 //  Get book review
-public_users.get('/review/:isbn',function (req, res) {
+public_users.get("/review/:isbn", function (req, res) {
   const ISBN = req.params.isbn;
+
   try {
-      const book = Object.values(books).filter(book => book.ISBN === ISBN);
-      if(book.length === 0) {
-          return res.status(400).json({error: "Book not found!"});
-      } else {
-          return res.status(200).json({book});
-      }
-    } catch (error) {
-          return res.status(400).json({error: error.message}); 
+    axios
+      .get(`https://www.googleapis.com/books/v1/volumes?q=isbn:${ISBN}`)
+      .then((response) => {
+        if (response.data.totalItems === 0) {
+          return res.status(400).json({ error: "Book not found!" });
+        } else {
+          const title = response.data.items[0].volumeInfo.title;
+          console.log(title);
+          const review = Object.values(books).filter((book) => book.title === title)[0].reviews;
+          if (Object.keys(review).length === 0) {
+            return res.status(400).json({ error: "No reviews found!" });
+          } else return res.status(200).json({ review });
+        }
+      });
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
   }
 });
 
