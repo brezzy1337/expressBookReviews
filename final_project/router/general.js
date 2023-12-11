@@ -1,4 +1,5 @@
 const express = require('express');
+const axios = require('axios');
 let books = require("./booksdb.js");
 let isValid = require("./auth_users.js").isValid;
 let users = require("./auth_users.js").users;
@@ -21,8 +22,21 @@ public_users.get('/',function (req, res) {
 
 // Get book details based on ISBN
 public_users.get('/isbn/:isbn',function (req, res) {
-  //Write your code here
-  return res.status(300).json({message: "Yet to be implemented"});
+  const ISBN = req.params.isbn;
+
+  try {
+      axios.get(`https://www.googleapis.com/books/v1/volumes?q=isbn:${ISBN}`)
+        .then(response => {
+          if(response.data.totalItems === 0) {
+            return res.status(400).json({error: "Book not found!"});
+          } else {
+            const book = response.data.items[0].volumeInfo;
+            return res.status(200).json({book});
+          }
+        });
+  } catch (error) {
+      return res.status(400).json({error: error.message});
+  }
  });
   
 // Get book details based on author
