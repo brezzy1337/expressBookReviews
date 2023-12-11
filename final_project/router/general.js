@@ -12,7 +12,7 @@ public_users.post("/register", (req, res) => {
   try {
     const newUser = { username, password };
 
-    users.push(newUser);
+    users[username] = newUser;
 
     return res.status(200).json({ message: "User registered successfully!" });
   } catch (error) {
