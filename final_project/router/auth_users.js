@@ -1,61 +1,129 @@
-const express = require('express');
-const jwt = require('jsonwebtoken');
+const express = require("express");
+const jwt = require("jsonwebtoken");
 let books = require("./booksdb.js");
-let users = require("./usersdb.js");
 const regd_users = express.Router();
-
+const fs = require("fs");
+let user = fs.readFile("usersdb.json");
+console.log(user);
 
 //returns boolean
 //write code to check is the username is valid
-const isValid = (username)=> { 
-if(username in users){
-  return false;
+function isValid(username, users) {
+  for (let user in users) {
+    if (users[user].username === username) {
+      return false;
+    }
   }
+  return true;
 }
 
-const authenticatedUser = (username,password)=>{ //returns boolean
 //write code to check if username and password match the one we have in records.
-}
+//returns boolean
+const authenticatedUser = (username, password) => {
+  if (username in users) {
+    if (users[username].password === password) {
+      return true;
+    }
+  }
+};
 
 //registers users with input
-regd_users.post("/register", (req, res) => {
+regd_users.post("/register", async (req, res) => {
   const { username, password } = req.body;
 
+  fs.open("usersdb.json");
+
+  // Read the existing users
+  let users;
+
+  if (fs.exists("usersdb.json") === true) {
+    const data = JSON.parse(fs.readFile("usersdb.json"));
+    users = data.users || [];
+  } else {
+    console.log("File does not exist");
+  }
+
+  
+  // Determine the next ID
+  const maxId = Math.max(...users.map(user => user.id));
+  const newId = maxId + 1;
+  
+  const newUser = {id: newId, username: username, password: password };
+
   try {
-    const newUser = { username, password };
 
     //check if username is already taken
     if (!isValid(username)) {
       return res.status(400).json({ message: "Username already exists!" });
     } else {
-      users[username] = newUser;
+      users.push(newUser);
+      // Write the users object to a JSON file
+      try{
+        fs.writeFileSync("usersdb.json");
+        return res.status(200).json({ message: "User registered successfully!" });
+      } catch (error) {
+        return res.status(500).json({ error: error.message });
+      }
     }
-
-    return res.status(200).json({ message: "User registered successfully!" });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
 });
 
 //only registered users can login
-regd_users.post("/login", (req,res) => {
-const {username, password} = req.body;
+regd_users.post("/login", (req, res) => {
+  const { username, password } = req.body;
 
-try {
-  
-} catch (error) {
-
-}
-
-  return res.status(300).json({message: "Yet to be implemented"});
+  try {
+    if (authenticatedUser(username, password) === false) {
+      return res.status(400).json({ message: "Invalid username or password" });
+    } else {
+      jwt.sign({ username }, "access", (err, accessToken) => {
+        if (err) {
+          return res.status(500).json({ error: err.message });
+        }
+        req.session.authorization = { accessToken };
+      });
+      return res.status(200).json({ message: "User logged in successfully!" });
+    }
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
 });
 
 // Add a book review
-regd_users.put("/auth/review/:isbn", (req, res) => {
-  //Write your code here
-  return res.status(300).json({message: "Yet to be implemented"});
+regd_users.post("/review/:ISBN/:rating/:comment", async (req, res) => {
+  const { ISBN, rating } = req.params;
+  const username = jwt.decode(req.session.authorization.accessToken).username;
+  const comment = req.params.comment;
+
+  try {
+    const response = await axios.get(
+      `https://www.googleapis.com/books/v1/volumes?q=isbn:${ISBN}`
+    );
+
+    if (response.data.totalItems === 0) {
+      return res.status(400).json({ error: "Book not found!" });
+    }
+
+    // Access the title from res.locals outside of the axios callback
+    const title = response.data.items[0].volumeInfo.title;
+    let bookIndex = books.findIndex((book) => book.title === title);
+    console.log(title, bookIndex);
+
+    if (bookIndex !== -1 && username in books[bookIndex].reviews) {
+      books[bookIndex].reviews[username] = { rating, comment };
+      return res.status(200).json({ message: "Review replaced successfully!" });
+    } else if (bookIndex !== -1 && !(username in books[bookIndex].reviews)) {
+      books[bookIndex].reviews[username] = { rating, comment };
+      return res.status(200).json({ message: "Review added successfully!" });
+    } else {
+      return res.status(400).json({ message: "Book not found!" });
+    }
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
 });
 
 module.exports.authenticated = regd_users;
 module.exports.isValid = isValid;
-module.exports.users = users;
