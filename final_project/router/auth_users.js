@@ -3,17 +3,19 @@ const jwt = require("jsonwebtoken");
 let books = require("./booksdb.js");
 const regd_users = express.Router();
 const fs = require("fs");
-let user = fs.readFile("usersdb.json");
-console.log(user);
 
 //returns boolean
 //write code to check is the username is valid
 function isValid(username, users) {
-  for (let user in users) {
-    if (users[user].username === username) {
+  for (let user of users) {
+    console.log("user:", user);
+    if (user.username === username) {
+      console.log(user.username, username);
+      console.log("Username already exists!");
       return false;
     }
   }
+  console.log("Username is valid!");
   return true;
 }
 
@@ -31,40 +33,39 @@ const authenticatedUser = (username, password) => {
 regd_users.post("/register", async (req, res) => {
   const { username, password } = req.body;
 
-  fs.open("usersdb.json");
-
   // Read the existing users
   let users;
 
-  if (fs.exists("usersdb.json") === true) {
-    const data = JSON.parse(fs.readFile("usersdb.json"));
+  if (fs.existsSync("./router/usersdb.json")) {
+    const data = await JSON.parse(fs.readFileSync("./router/usersdb.json", "utf8"));
     users = data.users || [];
+    console.log("File exists:" + JSON.stringify(users));
   } else {
     console.log("File does not exist");
   }
 
-  
   // Determine the next ID
-  const maxId = Math.max(...users.map(user => user.id));
+  const maxId = Math.max(...users.map((user) => user.id));
   const newId = maxId + 1;
-  
-  const newUser = {id: newId, username: username, password: password };
+  console.log("New ID:" + newId);
+
+  const newUser = { id: newId, username: username, password: password };
 
   try {
-
     //check if username is already taken
-    if (!isValid(username)) {
+    if (!isValid(username, users)) {
       return res.status(400).json({ message: "Username already exists!" });
-    } else {
-      users.push(newUser);
-      // Write the users object to a JSON file
-      try{
-        fs.writeFileSync("usersdb.json");
-        return res.status(200).json({ message: "User registered successfully!" });
-      } catch (error) {
-        return res.status(500).json({ error: error.message });
-      }
     }
+    // Write the users object to a JSON file
+    users.push(newUser); // Push the newUser object to the users array after checking if the username is valid
+    console.log("post push:", newUser);
+    try {
+      fs.writeFileSync("./router/usersdb.json", JSON.stringify({ users: users }), null, 2);
+    } catch (error) { 
+      console.log(error);
+    }
+    console.log(users);
+    return res.status(200).json({ message: "User registered successfully!" });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
