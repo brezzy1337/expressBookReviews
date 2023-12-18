@@ -1,5 +1,6 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
+const axios = require("axios");
 let books = require("./booksdb.js");
 const regd_users = express.Router();
 const fs = require("fs");
@@ -21,12 +22,36 @@ function isValid(username, users) {
 
 //write code to check if username and password match the one we have in records.
 //returns boolean
-const authenticatedUser = (username, password) => {
-  if (username in users) {
-    if (users[username].password === password) {
+const authenticatedUser = (username, password, users) => {
+  console.log("Checking username:", username, "password:", password);
+  for (let user of users) {
+    console.log(
+      "User in array - username:",
+      user.username,
+      "password:",
+      user.password
+    );
+    if (
+      user.username === username &&
+      String(user.password) === String(password)
+    ) {
+      console.log(user.username, username);
+      console.log("User Authenticated!");
       return true;
     }
   }
+  console.log("Username or password is incorrect! ");
+  return false;
+};
+
+const bookIndex = (title, books) => {
+  for (let bookkey in books) {
+    console.log(`Comparing "${books[bookkey].title}" with "${title}"`);
+    if (books[bookkey].title === title) {
+      return bookkey;
+    }
+  }
+  return -1;
 };
 
 //registers users with input
@@ -37,7 +62,9 @@ regd_users.post("/register", async (req, res) => {
   let users;
 
   if (fs.existsSync("./router/usersdb.json")) {
-    const data = await JSON.parse(fs.readFileSync("./router/usersdb.json", "utf8"));
+    const data = await JSON.parse(
+      fs.readFileSync("./router/usersdb.json", "utf8")
+    );
     users = data.users || [];
     console.log("File exists:" + JSON.stringify(users));
   } else {
@@ -60,8 +87,13 @@ regd_users.post("/register", async (req, res) => {
     users.push(newUser); // Push the newUser object to the users array after checking if the username is valid
     console.log("post push:", newUser);
     try {
-      fs.writeFileSync("./router/usersdb.json", JSON.stringify({ users: users }), null, 2);
-    } catch (error) { 
+      fs.writeFileSync(
+        "./router/usersdb.json",
+        JSON.stringify({ users: users }),
+        null,
+        2
+      );
+    } catch (error) {
       console.log(error);
     }
     console.log(users);
@@ -72,31 +104,51 @@ regd_users.post("/register", async (req, res) => {
 });
 
 //only registered users can login
-regd_users.post("/login", (req, res) => {
-  const { username, password } = req.body;
+regd_users.post("/login", async (req, res) => {
+  const username = req.body.username;
+  const password = req.body.password;
+  console.log("Username:", username, "Password:", password);
+
+  // Read the existing users
+  let users;
+
+  if (fs.existsSync("./router/usersdb.json")) {
+    const data = await JSON.parse(fs.readFileSync("./router/usersdb.json"));
+    users = data.users || [];
+    console.log("File exists:" + JSON.stringify(users));
+  } else {
+    console.log("File does not exist");
+  }
 
   try {
-    if (authenticatedUser(username, password) === false) {
+    if (authenticatedUser(username, password, users) === false) {
       return res.status(400).json({ message: "Invalid username or password" });
-    } else {
-      jwt.sign({ username }, "access", (err, accessToken) => {
-        if (err) {
-          return res.status(500).json({ error: err.message });
-        }
-        req.session.authorization = { accessToken };
-      });
-      return res.status(200).json({ message: "User logged in successfully!" });
     }
+    jwt.sign({ username }, "access", (err, accessToken) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      res.cookie("accessToken", accessToken, { httpOnly: true });
+      return res
+        .status(200)
+        .json({ message: "User logged in successfully!", accessToken });
+    });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
 });
 
 // Add a book review
-regd_users.post("/review/:ISBN/:rating/:comment", async (req, res) => {
-  const { ISBN, rating } = req.params;
-  const username = jwt.decode(req.session.authorization.accessToken).username;
-  const comment = req.params.comment;
+regd_users.post("/review/:ISBN", async (req, res) => {
+  const ISBN = req.params.ISBN;
+  const rating = req.body.rating;
+  const comment = req.body.comment;
+
+  const token = req.cookies.accessToken;
+  console.log("Token:", token);
+
+  const username = jwt.decode(token).username;
+  console.log("Username:", username);
 
   try {
     const response = await axios.get(
@@ -108,18 +160,62 @@ regd_users.post("/review/:ISBN/:rating/:comment", async (req, res) => {
     }
 
     // Access the title from res.locals outside of the axios callback
-    const title = response.data.items[0].volumeInfo.title;
-    let bookIndex = books.findIndex((book) => book.title === title);
-    console.log(title, bookIndex);
+    const title = await response.data.items[0].volumeInfo.title;
+    console.log("Title:", title);
+    const Index = bookIndex(title, books);
+    console.log("Book index:", Index);
 
-    if (bookIndex !== -1 && username in books[bookIndex].reviews) {
-      books[bookIndex].reviews[username] = { rating, comment };
+    if (Index !== -1 && username in books[Index].reviews.username) {
+      books[Index].reviews[user] = { username, rating, comment };
+      fs.writeFileSync("./router/booksdb.json", JSON.stringify(books), null, 2);
       return res.status(200).json({ message: "Review replaced successfully!" });
-    } else if (bookIndex !== -1 && !(username in books[bookIndex].reviews)) {
-      books[bookIndex].reviews[username] = { rating, comment };
+    } else if (Index !== -1 && !(username in books[Index].reviews)) {
+      books[Index].reviews = { user: { username, rating, comment } };
+      fs.writeFileSync("./router/booksdb.json", JSON.stringify(books), null, 2);
       return res.status(200).json({ message: "Review added successfully!" });
     } else {
       return res.status(400).json({ message: "Book not found!" });
+    }
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+regd_users.delete("/review/:isbn", async (req, res) => {
+  const ISBN = req.params.isbn;
+  const token = req.cookies.accessToken;
+  const username = jwt.decode(token).username;
+  console.log("Token:", token);
+  console.log("Username:", username);
+
+  try {
+    const response = await axios.get(
+      `https://www.googleapis.com/books/v1/volumes?q=isbn:${ISBN}`
+    );
+
+    if (response.data.totalItems === 0) {
+      return res.status(400).json({ error: "Book not found in API!" });
+    }
+
+    const books = JSON.parse(fs.readFileSync("./router/booksdb.json"));
+
+    // Access the title from res.locals outside of the axios callback
+    const title = response.data.items[0].volumeInfo.title;
+    console.log("Title:", title);
+    const Index = bookIndex(title, books);
+    console.log("Book index:", Index);
+
+    console.log("Book:", books[Index]);
+
+    if (
+      Index !== -1 &&
+      username === books[Index].reviews.user.username
+    ) {
+      delete books[Index].reviews.user;
+      fs.writeFileSync("./router/booksdb.json", JSON.stringify(books), null, 2);
+      return res.status(200).json({ message: "Review deleted successfully!" });
+    } else {
+      return res.status(400).json({ message: "Book not found in database!" });
     }
   } catch (error) {
     return res.status(500).json({ error: error.message });
